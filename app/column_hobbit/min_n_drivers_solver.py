@@ -4,6 +4,7 @@ import numpy as np
 import arc
 
 from csp_wizard.node import Node
+from initial_patterns import InitialPatternsGenerator
 
 from time_constraint_shortest_path_solver import TimeConstraintShortestPathSolver
 from time_constraint_shortest_path_solver_ver2 import TimeConstraintShortestPathSolverVer2
@@ -11,21 +12,29 @@ from time_constraint_shortest_path_solver_ver2 import TimeConstraintShortestPath
 from create_graph_min_n_drivers import create_graph_min_n_drivers
 
 class MinNDriverSolver:
-    def __init__(self, T_small, T_big, tasks, max_iterations=100):
-        self.T_small = T_small
-        self.T_big = T_big
+    def __init__(self, T_idle, T_all,T_drive ,tasks, max_iterations=100):
+        self.T_idle = T_idle
+        self.T_all = T_all
         self.tasks = tasks
         self.n = len(tasks)
+        self.T_drive = T_drive
+        # initial_pattern_generator = InitialPatternsGenerator(tasks, T_idle, T_drive)
+        # initial_pattern_generator.solve()
+        # initial_pattern_generator.pattern_column_generator()
+        # self.patterns_columns = initial_pattern_generator.patterns_columns
+        # self.patterns = initial_pattern_generator.patterns
         self.patterns = [[i] for i in range(self.n)]
-        self.patterns_columns = np.identity(self.n)
+        self.patterns_columns = np.eye(self.n)
+       
         self.restricted_model = gp.Model("restricted_master_solver")
         self.final_model = gp.Model("final_master_solver")
         # Create variables
         self.x =  [self.restricted_model.addVar( vtype=GRB.CONTINUOUS,
                                            lb = 0,
+                                           ub = 1,
                                            
                                             name=f"x_{i} ") 
-                   for i in range(self.n)]
+                   for i in range(len(self.patterns))]
         
         
         self.x_final = None 
@@ -34,7 +43,7 @@ class MinNDriverSolver:
         self.new_pattern = None
         self.new_pattern_column = None
         self.max_iterations = max_iterations
-
+    
     def restricted_master_solver(self):
         # Set objective
         self.restricted_model.setObjective(sum(self.x), GRB.MINIMIZE)
@@ -55,13 +64,14 @@ class MinNDriverSolver:
     
     def solve_sub_problem(self):
         #create sub problem
-        nodes = create_graph_min_n_drivers(self.tasks, self.pi, self.T_small, self.T_big)
+        nodes = create_graph_min_n_drivers(self.tasks, self.pi, self.T_idle, self.T_drive)
         csp = TimeConstraintShortestPathSolverVer2(
             nodes = nodes,
             start_node = 0,
             end_node = len(self.tasks)*2+1,
-            time_constraint = self.T_big, 
+            time_constraint = self.T_drive, 
             )
+        self.nodes = nodes
         csp.solve()
         ans = csp.get_result()
         csp.get_new_pattern_from_path(ans=ans,tasks=self.tasks)
@@ -75,7 +85,6 @@ class MinNDriverSolver:
         # Set objective
         self.final_model.setObjective(self.x_final.sum(), GRB.MINIMIZE)
         #remove all constraints
-        self.final_model.remove(self.final_model.getConstrs())
         # Add constraints
         A = self.patterns_columns
         for i in range(self.n):
@@ -97,8 +106,8 @@ class MinNDriverSolver:
             #add thêm vào x một biến mới
             self.x.append(self.restricted_model.addVar( vtype=GRB.CONTINUOUS,
                                              lb = 0,
-                                            
-                                            name=f"x_{i} "))
+                                            ub = 1,
+            ))
 
         self.solve_final_master_problem()
         self.final_n_drivers = int(sum(self.x_final.X))
